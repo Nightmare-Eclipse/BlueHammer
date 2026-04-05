@@ -685,7 +685,7 @@ UpdateFiles* GetUpdateFiles(int* filecount = NULL)
 	InternetCloseHandle(hint);
 	hint = NULL;
 	InternetCloseHandle(hint2);
-	hint = NULL;
+	hint2 = NULL;
 	printf("Done.\n");
 	mappedbuff = GetCabFileFromBuff((PIMAGE_DOS_HEADER)exebuff, sz, &ressz);
 
@@ -3318,7 +3318,7 @@ int wmain(int argc, wchar_t* argv[])
 				goto cleanup;
 			}
 
-			UnlockFile(hleakedfile, NULL, NULL, NULL, NULL);
+			UnlockFileEx(hleakedfile, 0, _filesz.LowPart, _filesz.HighPart, &ovd2);
 			filelocked = false;
 			CloseHandle(hleakedfile);
 			printf("Read %d bytes\n", __readsz);
@@ -3377,7 +3377,7 @@ cleanup:
 
 	if(hint)
 		InternetCloseHandle(hint);
-	if(hint)
+	if(hint2)
 		InternetCloseHandle(hint2);
 	if (exebuff)
 		free(exebuff);
@@ -3407,7 +3407,7 @@ cleanup:
 	if (hleakedfile)
 	{
 		if (filelocked)
-			UnlockFile(hleakedfile, NULL, NULL, NULL, NULL);
+			UnlockFileEx(hleakedfile, 0, _filesz.LowPart, _filesz.HighPart, &ovd2);
 		CloseHandle(hleakedfile);
 	}
 	if (leakedfilebuff)
