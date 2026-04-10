@@ -79,6 +79,7 @@
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <IncludePath>C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;$(IncludePath)</IncludePath>
+    <OutDir>$(SolutionDir)$(Platform)v1\$(Configuration)\</OutDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <IncludePath>C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;$(IncludePath)</IncludePath>
